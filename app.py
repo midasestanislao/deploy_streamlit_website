@@ -27,6 +27,7 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 import json
 from pathlib import Path
+import platform
 
 # ============================================================================
 # CONFIGURATION AND CONSTANTS
@@ -723,8 +724,8 @@ class ConfigurationManager:
             '12764096013', '12408978820'
         ],
         'time_formats': [
-            '2025-07-10T12:42:42', '2025-01-15T09:30:15', '2025-09-22T14:15:30',
-            '2025-11-12T11:20:25', '2025-12-01T13:55:10'
+            '2025-07-10T12:42:42', '2025-08-15T09:30:15', '2025-09-22T14:15:30',
+            '2025-10-05T16:45:00', '2025-11-12T11:20:25', '2025-12-01T13:55:10'
         ],
         'default_timezone': 'America/New_York'
     }
@@ -912,7 +913,43 @@ class TimeManager:
             return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 # ============================================================================
-# ENHANCED UI RENDERER
+# CLIPBOARD UTILITY - NEW ADDITION
+# ============================================================================
+
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text to clipboard using platform-specific methods."""
+    try:
+        # Try pyperclip first if available
+        import pyperclip
+        pyperclip.copy(text)
+        return True
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    
+    # Try platform-specific commands
+    try:
+        system = platform.system()
+        if system == "Darwin":  # macOS
+            import subprocess
+            subprocess.run("pbcopy", text=True, input=text, check=True)
+            return True
+        elif system == "Linux":
+            import subprocess
+            subprocess.run("xclip", text=True, input=text, check=True)
+            return True
+        elif system == "Windows":
+            import subprocess
+            subprocess.run("clip", text=True, input=text, check=True)
+            return True
+    except:
+        pass
+    
+    return False
+
+# ============================================================================
+# ENHANCED UI RENDERER - MODIFIED FOR COPY FUNCTIONALITY
 # ============================================================================
 
 class EnhancedUIRenderer:
@@ -1207,16 +1244,32 @@ class EnhancedUIRenderer:
                 return None, False
     
     def render_agent_prompt(self, agent: Agent, prompt: str, key_prefix: str = ""):
-        """Render agent prompt section."""
+        """Render agent prompt section with copy functionality."""
         st.markdown(f"### 🤖 {agent.name.replace('_', ' ').title()} Prompt")
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
+        # Copy full prompt button
         with col1:
-            if st.button("📋 Copy to Clipboard", key=f"copy_{key_prefix}_{agent.name}"):
-                st.info("📋 Select the text below and copy (Ctrl+C)")
+            if st.button("📋 Copy Full Prompt", key=f"copy_{key_prefix}_{agent.name}"):
+                if copy_to_clipboard(agent.system_prompt):
+                    st.success("✅ Copied to clipboard!")
+                else:
+                    st.info("📋 Manual copy required - use Ctrl+C on the text below")
+                    st.text_area("Full Prompt", agent.system_prompt, height=150, key=f"copy_area_{key_prefix}_{agent.name}")
         
+        # Copy generated prompt if different
         with col2:
+            if prompt != agent.system_prompt:
+                if st.button("📋 Copy Generated", key=f"copy_gen_{key_prefix}_{agent.name}"):
+                    if copy_to_clipboard(prompt):
+                        st.success("✅ Copied to clipboard!")
+                    else:
+                        st.info("📋 Manual copy required - use Ctrl+C on the text below")
+                        st.text_area("Generated Prompt", prompt, height=150, key=f"copy_gen_area_{key_prefix}_{agent.name}")
+        
+        # Download button
+        with col3:
             st.download_button(
                 label="💾 Download",
                 data=prompt,
@@ -1225,11 +1278,15 @@ class EnhancedUIRenderer:
                 key=f"download_{key_prefix}_{agent.name}"
             )
         
-        with st.expander("View Full Prompt"):
-            st.code(prompt, language="text")
+        # Show preview
+        with st.expander("View Prompt Preview"):
+            preview = agent.system_prompt[:500] + "..." if len(agent.system_prompt) > 500 else agent.system_prompt
+            st.code(preview, language="text")
+            if len(agent.system_prompt) > 500:
+                st.caption(f"📝 Showing first 500 characters of {len(agent.system_prompt)} total")
 
 # ============================================================================
-# MAIN APPLICATION WITH ENHANCED SERVICE DETECTION
+# MAIN APPLICATION WITH ENHANCED SERVICE DETECTION - MODIFIED
 # ============================================================================
 
 class EnhancedAgentPromptProcessor:
@@ -1343,7 +1400,7 @@ class EnhancedAgentPromptProcessor:
             logger.error(f"Processing error: {e}", exc_info=True)
     
     def _render_results(self):
-        """Render processing results."""
+        """Render processing results with copy functionality."""
         st.markdown("---")
         
         # Metrics
@@ -1359,15 +1416,38 @@ class EnhancedAgentPromptProcessor:
             st.markdown("---")
             self.ui_renderer.render_enhanced_service_info(st.session_state.service_info)
         
-        # Agents overview
+        # Agents overview with copy functionality
         if st.session_state.agents:
             st.markdown("---")
             st.markdown("### 🤖 Detected Agents")
             
             for agent in st.session_state.agents:
                 with st.expander(f"{agent.name} • {agent.model_name}"):
+                    # Copy and download buttons
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("📋 Copy Full Prompt", key=f"agent_copy_{agent.name}"):
+                            if copy_to_clipboard(agent.system_prompt):
+                                st.success("✅ Copied!")
+                            else:
+                                st.info("📋 Use Ctrl+C to copy from below")
+                                st.text_area("Full Prompt", agent.system_prompt, height=150, key=f"copy_area_{agent.name}")
+                    
+                    with col2:
+                        st.download_button(
+                            label="💾 Download Prompt",
+                            data=agent.system_prompt,
+                            file_name=f"{agent.name}_prompt.txt",
+                            mime="text/plain",
+                            key=f"download_agent_{agent.name}"
+                        )
+                    
+                    # Show preview
+                    st.markdown("**Preview:**")
                     preview = agent.system_prompt[:500] + "..." if len(agent.system_prompt) > 500 else agent.system_prompt
                     st.code(preview, language="text")
+                    if len(agent.system_prompt) > 500:
+                        st.caption(f"📝 Showing first 500 characters of {len(agent.system_prompt)} total")
         
         # Variables section
         if st.session_state.variables:
